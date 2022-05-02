@@ -1,0 +1,39 @@
+{
+     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+     "contentVersion": "1.0.0.0",
+     "parameters": {
+         "region": {
+               "type": "string"
+          },
+        "system": {
+            "type": "string"
+        },
+        "environment":{
+            "type": "string"
+        }
+     },
+     "functions": [],
+     "variables": {
+          "RSVName": "[concat('rsv-',parameters('environment'),'-',parameters('system'))]"
+     },
+     "resources": [
+         {
+             "name": "[variables('RSVName')]",
+             "type": "Microsoft.RecoveryServices/vaults",
+             "apiVersion": "2018-01-10",
+             "location": "[parameters('region')]",
+             "tags": {},
+             "properties": {},
+             "sku": {
+                 "name": "RS0",
+                 "tier": "Standard"
+             }
+         }
+     ],
+     "outputs": {
+          "RSVName":{
+               "type": "string",
+               "value":"[variables('RSVName')]"
+          }
+     }
+ }

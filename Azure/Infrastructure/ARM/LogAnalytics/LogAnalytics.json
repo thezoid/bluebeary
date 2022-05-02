@@ -1,0 +1,315 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "lawdataRetention": {
+            "type": "int",
+            "defaultValue": 30,
+            "minValue": 7,
+            "maxValue": 730,
+            "metadata": {
+                "description": "Number of days of retention. Workspaces in the legacy Free pricing tier can only have 7 days."
+            }
+        },
+        "lawMSFTSolutions": {
+            "type": "array"
+        },
+        "region": {
+               "type": "string"
+          },
+        "system": {
+            "type": "string"
+        },
+        "environment":{
+            "type": "string"
+        }
+    },
+    "variables": {
+        "LAWName": "[concat('law-',parameters('environment'),'-',parameters('system'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.OperationalInsights/workspaces",
+            "apiVersion": "2015-11-01-preview",
+            "name": "[variables('LAWName')]",
+            "location": "[parameters('region')]",
+            "properties": {
+                "sku": {
+                    "name": "PerGB2018"
+                },
+                "retentionInDays": "[parameters('lawdataRetention')]"
+            },
+            "resources": [
+                {
+                    "type": "datasources",
+                    "apiVersion": "2020-08-01",
+                    "name": "WindowsEventsSystem",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "WindowsEvent",
+                    "properties": {
+                        "eventLogName": "System",
+                        "eventTypes": [
+                            {
+                                "eventType": "Error"
+                            },
+                            {
+                                "eventType": "Warning"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "datasources",
+                    "apiVersion": "2020-08-01",
+                    "name": "WindowsEventsApplication",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "WindowsEvent",
+                    "properties": {
+                        "eventLogName": "Application",
+                        "eventTypes": [
+                            {
+                                "eventType": "Error"
+                            },
+                            {
+                                "eventType": "Warning"
+                            },
+                            {
+                                "eventType": "Information"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "datasources",
+                    "apiVersion": "2020-08-01",
+                    "name": "SyslogKern",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "LinuxSyslog",
+                    "properties": {
+                        "syslogName": "kern",
+                        "syslogSeverities": [
+                            {
+                                "severity": "emerg"
+                            },
+                            {
+                                "severity": "alert"
+                            },
+                            {
+                                "severity": "crit"
+                            },
+                            {
+                                "severity": "err"
+                            },
+                            {
+                                "severity": "warning"
+                            },
+                            {
+                                "severity": "notice"
+                            },
+                            {
+                                "severity": "info"
+                            },
+                            {
+                                "severity": "debug"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "datasources",
+                    "apiVersion": "2020-08-01",
+                    "name": "SyslogDaemon",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "LinuxSyslog",
+                    "properties": {
+                        "syslogName": "daemon",
+                        "syslogSeverities": [
+                            {
+                                "severity": "emerg"
+                            },
+                            {
+                                "severity": "alert"
+                            },
+                            {
+                                "severity": "crit"
+                            },
+                            {
+                                "severity": "err"
+                            },
+                            {
+                                "severity": "warning"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "SyslogCollection",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "LinuxSyslogCollection",
+                    "properties": {
+                        "state": "Enabled"
+                    }
+                },
+
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "WindowsPerfMemoryAvailableBytes",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "WindowsPerformanceCounter",
+                    "properties": {
+                        "objectName": "Memory",
+                        "instanceName": "*",
+                        "intervalSeconds": 10,
+                        "counterName": "Available MBytes "
+                    }
+                },
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "WindowsPerfMemoryPercentageBytes",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "WindowsPerformanceCounter",
+                    "properties": {
+                        "objectName": "Memory",
+                        "instanceName": "*",
+                        "intervalSeconds": 10,
+                        "counterName": "% Committed Bytes in Use"
+                    }
+                },
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "WindowsPerfProcessorPercentage",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "WindowsPerformanceCounter",
+                    "properties": {
+                        "objectName": "Processor",
+                        "instanceName": "_Total",
+                        "intervalSeconds": 10,
+                        "counterName": "% Processor Time"
+                    }
+                },
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "LinuxPerformanceLogicalDisk",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "LinuxPerformanceObject",
+                    "properties": {
+                        "objectName": "Logical Disk",
+                        "instanceName": "*",
+                        "intervalSeconds": 10,
+                        "performanceCounters": [
+                            {
+                                "counterName": "% Used Inodes"
+                            },
+                            {
+                                "counterName": "Free Megabytes"
+                            },
+                            {
+                                "counterName": "% Used Space"
+                            },
+                            {
+                                "counterName": "Disk Transfers/sec"
+                            },
+                            {
+                                "counterName": "Disk Reads/sec"
+                            },
+                            {
+                                "counterName": "Disk Writes/sec"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "LinuxPerformanceProcessor",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "LinuxPerformanceObject",
+                    "properties": {
+                        "objectName": "Processor",
+                        "instanceName": "*",
+                        "intervalSeconds": 10,
+                        "performanceCounters": [
+                            {
+                                "counterName": "% Processor Time"
+                            },
+                            {
+                                "counterName": "% Privileged Time"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "apiVersion": "2020-08-01",
+                    "type": "datasources",
+                    "name": "IISLog",
+                    "dependsOn": [
+                        "[concat('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+                    ],
+                    "kind": "IISLogs",
+                    "properties": {
+                        "state": "OnPremiseEnabled"
+                    }
+                }
+            ]
+        },
+        {
+            "copy": {
+                "name": "MSFTOMSSolutions",
+                "count": "[length(parameters('lawMSFTSolutions'))]"
+            },
+            "apiVersion": "2015-11-01-preview",
+            "location": "[parameters('region')]",
+            "name": "[concat(parameters('lawMSFTSolutions')[copyIndex('MSFTOMSSolutions')], '(', variables('LAWName'), ')')]",
+            "type": "Microsoft.OperationsManagement/solutions",
+            "dependsOn": [
+                "[variables('LAWName')]"
+            ],
+            "properties": {
+                "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces/', variables('LAWName'))]"
+            },
+            "plan": {
+                "name": "[concat(parameters('lawMSFTSolutions')[copyIndex('MSFTOMSSolutions')], '(', variables('LAWName'), ')')]",
+                "publisher": "Microsoft",
+                "promotionCode": "",
+                "product": "[concat('OMSGallery/', parameters('lawMSFTSolutions')[copyIndex('MSFTOMSSolutions')])]"
+            }
+        }
+    ],
+    "outputs": {
+        "LAW": {
+            "type": "object",
+            "value": {
+                "name": "[variables('LAWName')]",
+                "resourceId": "[resourceId('Microsoft.OperationalInsights/Workspaces', variables('LAWName'))]",
+                "primKey": "[listKeys(resourceId('Microsoft.OperationalInsights/Workspaces', variables('LAWName')), '2015-11-01-preview').primarySharedKey]",
+                "workspaceID":"[reference(resourceId('Microsoft.OperationalInsights/Workspaces', variables('LAWName')), '2015-03-20').customerId]"
+            }
+        }
+    }
+}
