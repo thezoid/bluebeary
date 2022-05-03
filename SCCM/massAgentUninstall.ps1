@@ -8,9 +8,9 @@ Foreach ($record in (import-csv -path "C:\temp\servers.csv")) {
                     $status = 'info'
                }
                switch ($status.ToLower()) {
-                    "info" { write-host "*[$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" -foregroundcolor blue; try { "*[$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" | out-file "\\APINFRJUMP01\c$\Logs\SCCM Uninstall Logs\$(get-date -format "yyyyMMMdd")-SCCMUninstall.csv" -append }catch {} }
-                    "warning" { write-host "![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" -foregroundcolor yellow; try { "![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" | out-file "\\APINFRJUMP01\c$\Logs\SCCM Uninstall Logs\$(get-date -format "yyyyMMMdd")-SCCMUninstall.csv" -append }catch {} }
-                    "error" { write-host "!!![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" -foregroundcolor red; try { "!!![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" | out-file "\\APINFRJUMP01\c$\Logs\SCCM Uninstall Logs\$(get-date -format "yyyyMMMdd")-SCCMUninstall.csv" -append }catch {} }
+                    "info" { write-host "*[$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" -foregroundcolor blue; try { "*[$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" | out-file "$($PSScriptRoot)\$(get-date -format "yyyyMMMdd")-SCCMUninstall.csv" -append }catch {} }
+                    "warning" { write-host "![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" -foregroundcolor yellow; try { "![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" | out-file "$($PSScriptRoot)\$(get-date -format "yyyyMMMdd")-SCCMUninstall.csv" -append }catch {} }
+                    "error" { write-host "!!![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" -foregroundcolor red; try { "!!![$(get-date -format "yyyyMMMdd@hh:mm:ss")] $($message)" | out-file "$($PSScriptRoot)\$(get-date -format "yyyyMMMdd")-SCCMUninstall.csv" -append }catch {} }
                }
           }
           If (test-path -path "C:\Windows\ccmsetup") {
