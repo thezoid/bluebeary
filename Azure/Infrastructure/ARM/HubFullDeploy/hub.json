@@ -1,0 +1,155 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "hub": {
+            "type": "object"
+        },
+        "zones": {
+            "type": "array"
+        }
+    },
+    "variables": {
+        "publicIPzonesSKU": "[if(equals(parameters('hub').availzones,'true'),'Standard','Basic')]", //if zones available set SKU to Standard
+        "publicIPzonesAllocation": "[if(equals(parameters('hub').availzones, 'true'),'Static','Dynamic')]" //if zones available set Allocation to Static
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[parameters('hub').vnet.name]",
+            "location": "[parameters('hub').region]",
+            "apiVersion": "2019-04-01",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": "[parameters('hub').vnet.prefix]"
+                },
+                "copy": [
+                    {
+                        "name": "subnets",
+                        "count": "[length(parameters('hub').vnet.subnets)]",
+                        "input": {
+                            "name": "[parameters('hub').vnet.subnets[copyIndex('subnets')].name]",
+                            "properties": {
+                                "addressPrefix": "[parameters('hub').vnet.subnets[copyIndex('subnets')].prefix]"
+                            }
+                        }
+                    }
+                ]
+            },
+            "tags": {}
+        },
+
+        {
+            "apiVersion": "2019-02-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[parameters('hub').ergateway.publicIpName]",
+            "location": "[parameters('hub').region]",
+            "properties": {
+                "publicIPAllocationMethod": "[variables('publicIPzonesAllocation')]"
+            },
+            "sku": {
+                "name": "[variables('publicIPzonesSKU')]"
+            }
+        },
+
+        {
+            "apiVersion": "2019-04-01",
+            "name": "[parameters('hub').ergateway.name]",
+            "type": "Microsoft.Network/virtualNetworkGateways",
+            "location": "[parameters('hub').region]",
+            "dependsOn": [
+                "[parameters('hub').vnet.name]",
+                "[parameters('hub').ergateway.publicIpName]"
+            ],
+            "tags": {},
+            "properties": {
+                "gatewayType": "[parameters('hub').ergateway.gatewayType]",
+                "ipConfigurations": [
+                    {
+                        "name": "default",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets',parameters('hub').vnet.name, 'GatewaySubnet')]"
+                            },
+                            "publicIpAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',parameters('hub').ergateway.publicIpName)]"
+                            }
+                        }
+                    }
+                ],
+                "sku": {
+                    "name": "[parameters('hub').ergateway.sku]",
+                    "tier": "[parameters('hub').ergateway.sku]"
+                }
+            }
+        },
+
+        {
+            "apiVersion": "2019-02-01",
+            "type": "Microsoft.Network/publicIpAddresses",
+            "name": "[parameters('hub').AzureFirewall.ManagementPublicIPName]",
+            "location": "[parameters('hub').region]",
+            "sku": {
+                "name": "Standard"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Static"
+            },
+            "tags": {}
+        },
+        {
+            "apiVersion": "2019-02-01",
+            "type": "Microsoft.Network/publicIpAddresses",
+            "name": "[parameters('hub').AzureFirewall.PublicIPName]",
+            "location": "[parameters('hub').region]",
+            "sku": {
+                "name": "Standard"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Static"
+            },
+            "tags": {}
+        },
+        {
+            "apiVersion": "2020-05-01",
+            "type": "Microsoft.Network/azureFirewalls",
+            "name": "[parameters('hub').AzureFirewall.Name]",
+            "location": "[parameters('hub').region]",
+            "zones": "[parameters('zones')]",
+            "dependsOn": [
+                "[parameters('hub').AzureFirewall.ManagementPublicIpName]",
+                "[parameters('hub').AzureFirewall.PublicIpName]",
+                "[parameters('hub').vnet.name]",
+                "[parameters('hub').ergateway.name]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "[parameters('hub').AzureFirewall.PublicIPName]",
+                        "properties": {
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hub').vnet.name, 'AzureFirewallSubnet')]"
+                            },
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', parameters('hub').AzureFirewall.publicIpName)]"
+                            }
+                        }
+                    }
+                ],
+                "managementIpConfiguration": {
+                    "name": "[parameters('hub').AzureFirewall.managementPublicIpName]",
+                    "properties": {
+                        "subnet": {
+                            "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets',parameters('hub').vnet.name, 'AzureFirewallManagementSubnet')]"
+                        },
+                        "publicIPAddress": {
+                            "id": "[resourceId('Microsoft.Network/publicIpAddresses',parameters('hub').AzureFirewall.managementPublicIpName)]"
+                        }
+                    }
+                }
+            },
+            "tags": {}
+        }
+    ]
+}

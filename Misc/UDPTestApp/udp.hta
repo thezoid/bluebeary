@@ -1,0 +1,29 @@
+<html>
+	<head>
+		<title>UDP Port Tester</title>
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+		<hta:application applicationname="UDP Tester GUI" version="0.1" border="no" caption="yes" showintaskbar="yes" singleinstance="yes" sysmenu="yes" selection="no" innerborder="no" scroll="yes"	/>
+		<link rel="stylesheet" type="text/css" href="main.css">
+		<script language="vbscript" src="udp.vbs"></script>
+	</head>
+	<body onload="Resize()">
+		<div id="content">
+			<h1 style="text-align:center;">UDP Port Tester</h1>
+			<div style="margin-top:10px; margin-bottom:30px;">
+			<p>This application tests whether the given machines have open UDP connections on the supplied ports.<br/><br/>Provide the destinations you would like to test and the ports. <strong>Multiple values must be separated by commas (,).</strong></p>
+			</div>
+			<label for="targets">Targets:  </label>
+			<br />
+			<textarea id="targets" rows="5" cols="50"> </textarea>
+			<br /><br />
+			<label for="ports" >Ports:  </label>
+			<br />
+			<textarea id="ports" rows="5" cols="50"> </textarea>
+			<br /><br />
+			<input type="button" id="btn_test" value="Test!" onclick="Test()" />
+			<br /><br />
+			<h4>Results:</h4>
+			<div id="result_id"></div>
+		</div>
+	</body>
+</html>

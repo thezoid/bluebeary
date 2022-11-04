@@ -1,0 +1,59 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json//",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "zones": { 
+      "value": [
+        "1",
+        "2",
+        "3" 
+      ]
+    },
+    "hub": {
+      "value": {
+        "region": "eastus2",
+        "availzones": "true", //ensure your region supports availaiblity zones
+        "resourceGroup": "network-hub-EUS2", //resource group that contains virtualnetwork
+        "vnet": {
+          "name": "hub-vnet-EUS2",
+          "prefix": [
+            "10.0.0.0/24" //hub vnet
+          ],
+          "subnets": [
+            {
+              "name": "GatewaySubnet", //DO NOT CHANGE - REQUIRED NAME
+              "prefix": "10.0.0.0/27"
+            },
+            {
+              "name": "HubServices",
+              "prefix": "10.0.0.32/27"
+            },
+            {
+              "name": "UnallocatedSpace", //rename/repurpose this subnet
+              "prefix": "10.0.0.64/26"
+            },
+            {
+              "name": "AzureFirewallManagementSubnet",
+              "prefix": "10.0.0.128/26"
+            },
+            {
+              "name": "AzureFirewallSubnet", //DO NOT CHANGE - REQUIRED NAME
+              "prefix": "10.0.0.192/26"
+            }
+          ]
+        },
+        "ERGateway": {
+          "name": "ER-Gateway-EUS2",
+          "GatewayType": "ExpressRoute",
+          "publicIPName": "ER-Gateway-PIP-EUS2",
+          "sku": "Standard" //Standard/HighPerformance/UltraPerformance or ErGw1Az/ErGw2Az/ErGw3Az
+        },
+        "AzureFirewall": {
+          "name": "Hub-AFW-EUS2",
+          "PublicIPName": "Hub-AFW-PIP-EUS2",
+          "ManagementPublicIPName": "Hub-AFW-MGMT-PIP-EUS2"
+        }
+      }
+    }
+  }
+}

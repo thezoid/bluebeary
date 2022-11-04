@@ -11,7 +11,7 @@ try{
 }catch{
     connect-azaccount
 }
-$reportPath = "c:\temp\$(get-date -format "yyyyMMdd")vmreport.csv"
+$reportPath = "c:\temp\$(get-date -format "yyyyMMdd")nsgReport.csv"
 "Subscription,Resource Group,NSG Name,Rule Name,Priority,Direction (In/Out),Allow/Deny,Protocol,Source Address,Source Ports,Destination Address,Destination Ports,Attached to (Count)" | out-file $reportPath
 
 $subs = get-azsubscription

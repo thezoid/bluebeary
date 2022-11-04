@@ -1,0 +1,25 @@
+<html>
+	<head>
+		<title>Credentials Package GUI</title>
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+		<hta:application applicationname="Credentials Package GUI" version="0.1" border="no" caption="yes" showintaskbar="yes" singleinstance="yes" sysmenu="yes" selection="no" innerborder="no" scroll="yes"	/>
+		<link rel="stylesheet" type="text/css" href="main.css">
+		<script language="vbscript" src="creds.vbs"></script>
+	</head>
+	<body onload="Resize()">
+		<div id="content">
+			<h1 style="text-align:center;">ADFS Account Manager</h1>
+			<div style="margin-top:10px; margin-bottom:30px;">
+			<p>This application works directly with the ADFS system.<br/>Provide the username you'd like to interact with, then choose the action you'd like to preform.</p>
+			</div>
+			<label for="username_id">Username:  </label>
+			<input type="text" id="username_id" value="" />
+			<br /><br />
+			<input type="button" id="btn_accountActivity" value="Account Activity" onclick="GetAccountActivity()" />
+			<input type="button" id="btn_resetLockout" value="Reset Lockout" onclick="ResetLockout()" />
+			<br /><br />
+			<h4>Results:</h4>
+			<div id="result_id"></div>
+		</div>
+	</body>
+</html>
