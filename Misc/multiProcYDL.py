@@ -30,6 +30,11 @@ if __name__ == "__main__":
         "https://www.youtube.com/watch?v=OblL026SvD4"
     ]
 
-    for target in targets:
-        proc = multiprocessing.Process(target=ydlTarget, args=(target, ydl_opts))
-        proc.start()
+    max_processes = 2  # Set the maximum number of concurrent processes
+
+    with multiprocessing.Pool(processes=max_processes) as pool:
+        pool.starmap(ydlTarget, [(target, ydl_opts) for target in targets])
+
+    # for target in targets:
+    #     proc = multiprocessing.Process(target=ydlTarget, args=(target, ydl_opts))
+    #     proc.start()
