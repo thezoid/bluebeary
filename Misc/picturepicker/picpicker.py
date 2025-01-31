@@ -35,50 +35,7 @@ class ImageSelector:
         self.destination_var.trace("w", self.on_directory_change)
 
         self.create_toolbar()
-
-        self.background_frame = ttk.Frame(master)
-        self.background_frame.grid(row=0, column=0, sticky='nsew')
-        master.grid_rowconfigure(0, weight=1)
-        master.grid_columnconfigure(0, weight=1)
-
-        self.image_frame = ttk.Frame(self.background_frame)
-        self.image_frame.grid(row=1, column=0, columnspan=3, sticky='nsew')
-        self.background_frame.grid_rowconfigure(1, weight=1)
-        self.background_frame.grid_columnconfigure(1, weight=1)
-
-        self.page_var = StringVar()
-        self.page_var.trace('w', self.on_page_number_change)
-
-        self.controls_frame = ttk.Frame(self.background_frame)
-        self.controls_frame.grid(row=2, column=1, sticky='ew')
-        self.controls_frame.grid_columnconfigure(0, weight=1)
-        self.controls_frame.grid_columnconfigure(2, weight=1)
-
-        self.pagination_frame = ttk.Frame(self.controls_frame)
-        self.pagination_frame.grid(row=0, column=1)
-        self.prev_button = ttk.Button(self.pagination_frame, text="Previous", command=self.prev_page)
-        self.prev_button.grid(row=0, column=0, padx=10)
-        self.page_entry = ttk.Entry(self.pagination_frame, textvariable=self.page_var, width=5, justify='center')
-        self.page_entry.grid(row=0, column=1)
-        self.page_label = ttk.Label(self.pagination_frame, text="")
-        self.page_label.grid(row=0, column=2, sticky='ew')
-        self.next_button = ttk.Button(self.pagination_frame, text="Next", command=self.next_page)
-        self.next_button.grid(row=0, column=3, padx=10)
-
-        ttk.Button(self.controls_frame, text="Save Selected Images", command=self.save_selected_images).grid(row=1, column=1, sticky='ew')
-
-        self.progress_frame = ttk.Frame(self.background_frame)
-        self.progress_frame.grid(row=3, column=0, columnspan=3, sticky='ew')
-        self.progress_label = ttk.Label(self.progress_frame, text="", anchor='w')
-        self.progress_label.pack(side='left', padx=5)
-        self.progress = ttk.Progressbar(self.progress_frame, mode='indeterminate')
-        self.progress.pack(side='left', fill='x', expand=True)
-        self.progress_frame.grid_remove()
-
-        self.validate_directories()
-
-        if self.source_var.get() and os.path.isdir(self.source_var.get()):
-            self.load_images_from_directory(self.source_var.get())
+        self.create_layout()
 
     def create_toolbar(self):
         menubar = Menu(self.master)
@@ -293,6 +250,15 @@ class ImageSelector:
             json.dump(settings, f)
 
     def load_settings(self):
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    self.settings = json.load(f)
+            else:
+                self.settings = {}
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+            self.settings = {}
         if os.path.exists(self.settings_file):
             with open(self.settings_file, 'r') as f:
                 self.settings = json.load(f)
@@ -308,6 +274,51 @@ class ImageSelector:
         if self.destination_var.get() and not os.path.isdir(self.destination_var.get()):
             messagebox.showerror("Error", "Destination directory does not exist. Please select a new destination folder.")
             self.browse_directory(self.destination_var)
+
+    def create_layout(self):
+        self.background_frame = ttk.Frame(self.master)
+        self.background_frame.grid(row=0, column=0, sticky='nsew')
+        self.master.grid_rowconfigure(0, weight=1)
+        self.master.grid_columnconfigure(0, weight=1)
+
+        self.image_frame = ttk.Frame(self.background_frame)
+        self.image_frame.grid(row=1, column=0, columnspan=3, sticky='nsew')
+        self.background_frame.grid_rowconfigure(1, weight=1)
+        self.background_frame.grid_columnconfigure(1, weight=1)
+
+        self.page_var = StringVar()
+        self.page_var.trace('w', self.on_page_number_change)
+
+        self.controls_frame = ttk.Frame(self.background_frame)
+        self.controls_frame.grid(row=2, column=1, sticky='ew')
+        self.controls_frame.grid_columnconfigure(0, weight=1)
+        self.controls_frame.grid_columnconfigure(2, weight=1)
+
+        self.pagination_frame = ttk.Frame(self.controls_frame)
+        self.pagination_frame.grid(row=0, column=1)
+        self.prev_button = ttk.Button(self.pagination_frame, text="Previous", command=self.prev_page)
+        self.prev_button.grid(row=0, column=0, padx=10)
+        self.page_entry = ttk.Entry(self.pagination_frame, textvariable=self.page_var, width=5, justify='center')
+        self.page_entry.grid(row=0, column=1)
+        self.page_label = ttk.Label(self.pagination_frame, text="")
+        self.page_label.grid(row=0, column=2, sticky='ew')
+        self.next_button = ttk.Button(self.pagination_frame, text="Next", command=self.next_page)
+        self.next_button.grid(row=0, column=3, padx=10)
+
+        ttk.Button(self.controls_frame, text="Save Selected Images", command=self.save_selected_images).grid(row=1, column=1, sticky='ew')
+
+        self.progress_frame = ttk.Frame(self.background_frame)
+        self.progress_frame.grid(row=3, column=0, columnspan=3, sticky='ew')
+        self.progress_label = ttk.Label(self.progress_frame, text="", anchor='w')
+        self.progress_label.pack(side='left', padx=5)
+        self.progress = ttk.Progressbar(self.progress_frame, mode='indeterminate')
+        self.progress.pack(side='left', fill='x', expand=True)
+        self.progress_frame.grid_remove()
+
+        self.validate_directories()
+
+        if self.source_var.get() and os.path.isdir(self.source_var.get()):
+            self.load_images_from_directory(self.source_var.get())
 
 def main():
     root = ThemedTk(theme="equilux")
