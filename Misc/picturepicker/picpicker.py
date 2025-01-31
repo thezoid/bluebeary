@@ -6,6 +6,7 @@ from tkinter import Tk, Label, Entry, Button, filedialog, Frame, StringVar, mess
 from PIL import Image, ImageTk
 from ttkthemes import ThemedTk
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 class ImageSelector:
     def __init__(self, master, gridScaleX=3, gridScaleY=3):
@@ -88,7 +89,7 @@ class ImageSelector:
             self.images_per_page = self.gridScaleX * self.gridScaleY
             self.total_pages = len(self.all_image_files) // self.images_per_page + (1 if len(self.all_image_files) % self.images_per_page else 0)
             self.current_page = 0
-            self.display_current_page()
+            threading.Thread(target=self.display_current_page).start()
             self.save_settings()
             window.destroy()
         except ValueError:
@@ -99,7 +100,7 @@ class ImageSelector:
             page = int(self.page_var.get()) - 1  # Convert to zero-indexed page number
             if 0 <= page < self.total_pages:
                 self.current_page = page
-                self.display_current_page()
+                threading.Thread(target=self.display_current_page).start()
             else:
                 self.page_var.set(str(self.current_page + 1))  # Reset to the current page number
         except ValueError:
@@ -128,7 +129,7 @@ class ImageSelector:
         self.all_image_files = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
         self.total_pages = len(self.all_image_files) // self.images_per_page + (1 if len(self.all_image_files) % self.images_per_page else 0)
         self.current_page = 0
-        self.display_current_page()
+        threading.Thread(target=self.display_current_page).start()
         self.progress.stop()
         self.progress_frame.grid_remove()
 
@@ -138,14 +139,26 @@ class ImageSelector:
 
         start_index = self.current_page * self.images_per_page
         end_index = min(start_index + self.images_per_page, len(self.all_image_files))
-        for i, filename in enumerate(self.all_image_files[start_index:end_index]):
-            row, column = divmod(i, self.gridScaleX)
-            self.display_image(filename, row, column)
+        filenames = self.all_image_files[start_index:end_index]
+
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(self.load_image, filename) for filename in filenames]
+            for i, future in enumerate(futures):
+                row, column = divmod(i, self.gridScaleX)
+                self.display_image(future.result(), row, column)
 
         self.page_label.config(text=f" of {self.total_pages}")
 
         # Pre-cache pages 2 before and 2 after the current page
         threading.Thread(target=self.pre_cache_pages).start()
+
+    def load_image(self, filename):
+        path = os.path.join(self.source_var.get(), filename)
+        img = Image.open(path)
+        target_width = self.image_frame.winfo_width() // self.gridScaleX - 10
+        target_height = self.image_frame.winfo_height() // self.gridScaleY - 10
+        img.thumbnail((target_width, target_height))
+        return ImageTk.PhotoImage(img)
 
     def pre_cache_pages(self):
         for offset in range(-2, 3):
@@ -158,33 +171,15 @@ class ImageSelector:
     def cache_page(self, page):
         start_index = page * self.images_per_page
         end_index = min(start_index + self.images_per_page, len(self.all_image_files))
-        for i, filename in enumerate(self.all_image_files[start_index:end_index]):
-            path = os.path.join(self.source_var.get(), filename)
-            img = Image.open(path)
-            target_width = self.image_frame.winfo_width() // self.gridScaleX - 10
-            target_height = self.image_frame.winfo_height() // self.gridScaleY - 10
-            img.thumbnail((target_width, target_height))
-            ImageTk.PhotoImage(img)  # Cache the image
+        for filename in self.all_image_files[start_index:end_index]:
+            self.load_image(filename)
 
-    def display_image(self, filename, row, column):
-        path = os.path.join(self.source_var.get(), filename)
-        img = Image.open(path)
-
-        # Calculate the target size dynamically based on the frame size, grid scale, and the number of images
-        num_images = len(self.all_image_files) - self.current_page * self.images_per_page
-        grid_x = self.gridScaleX if num_images >= self.gridScaleX else num_images
-        grid_y = self.gridScaleY if num_images // self.gridScaleX >= self.gridScaleY else num_images // self.gridScaleX + 1
-
-        target_width = self.image_frame.winfo_width() // grid_x - 10
-        target_height = self.image_frame.winfo_height() // grid_y - 10
-        img.thumbnail((target_width, target_height))
-        photo = ImageTk.PhotoImage(img)
-
+    def display_image(self, photo, row, column):
         button = ttk.Button(self.image_frame, image=photo, style='Image.TButton')
         button.image = photo  # Keep a reference!
         button.grid(row=row, column=column, padx=5, pady=5, sticky='nsew')
-        button.bind("<Button-1>", lambda e, path=path, button=button: self.toggle_image_selection(path, button))
-        button.selected = path in self.selected_images
+        button.bind("<Button-1>", lambda e, button=button: self.toggle_image_selection(button))
+        button.selected = button.image in self.selected_images
 
         if button.selected:
             button.config(style='Highlight.Image.TButton')
@@ -192,13 +187,13 @@ class ImageSelector:
         # Center the grid horizontally
         self.image_frame.grid_columnconfigure(column, weight=1)
 
-    def toggle_image_selection(self, path, button):
+    def toggle_image_selection(self, button):
         if button.selected:
-            self.selected_images.remove(path)
+            self.selected_images.remove(button.image)
             button.config(style='Image.TButton')  # Reset to default style
             button.selected = False
         else:
-            self.selected_images.append(path)
+            self.selected_images.append(button.image)
             button.config(style='Highlight.Image.TButton')  # Apply the highlight style
             button.selected = True
 
@@ -224,7 +219,7 @@ class ImageSelector:
             self.current_page -= 1
         else:
             self.current_page = self.total_pages - 1
-        self.display_current_page()
+        threading.Thread(target=self.display_current_page).start()
         self.update_page_number_entry()
 
     def next_page(self):
@@ -232,7 +227,7 @@ class ImageSelector:
             self.current_page += 1
         else:
             self.current_page = 0
-        self.display_current_page()
+        threading.Thread(target=self.display_current_page).start()
         self.update_page_number_entry()
 
     def update_page_number_entry(self):
