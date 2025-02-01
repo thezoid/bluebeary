@@ -47,6 +47,7 @@ class ImageSelector:
         action_menu.add_command(label="Update Grid Size", command=self.update_grid_size)
         action_menu.add_command(label="Set Source Folder", command=lambda: self.browse_directory(self.source_var))
         action_menu.add_command(label="Set Destination Folder", command=lambda: self.browse_directory(self.destination_var))
+        action_menu.add_command(label="Settings", command=self.open_settings_dialog)
 
         view_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="View", menu=view_menu)
@@ -89,7 +90,7 @@ class ImageSelector:
             self.images_per_page = self.gridScaleX * self.gridScaleY
             self.total_pages = len(self.all_image_files) // self.images_per_page + (1 if len(self.all_image_files) % self.images_per_page else 0)
             self.current_page = 0
-            threading.Thread(target=self.display_current_page).start()
+            self.master.after(0, self.display_current_page)
             self.save_settings()
             window.destroy()
         except ValueError:
@@ -100,7 +101,7 @@ class ImageSelector:
             page = int(self.page_var.get()) - 1  # Convert to zero-indexed page number
             if 0 <= page < self.total_pages:
                 self.current_page = page
-                threading.Thread(target=self.display_current_page).start()
+                self.master.after(0, self.display_current_page)
             else:
                 self.page_var.set(str(self.current_page + 1))  # Reset to the current page number
         except ValueError:
@@ -126,12 +127,16 @@ class ImageSelector:
         threading.Thread(target=self._load_images_from_directory, args=(directory,)).start()
 
     def _load_images_from_directory(self, directory):
-        self.all_image_files = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
-        self.total_pages = len(self.all_image_files) // self.images_per_page + (1 if len(self.all_image_files) % self.images_per_page else 0)
-        self.current_page = 0
-        threading.Thread(target=self.display_current_page).start()
-        self.progress.stop()
-        self.progress_frame.grid_remove()
+        try:
+            self.all_image_files = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
+            self.total_pages = len(self.all_image_files) // self.images_per_page + (1 if len(self.all_image_files) % self.images_per_page else 0)
+            self.current_page = 0
+            self.master.after(0, self.display_current_page)
+        except Exception as e:
+            self.master.after(0, lambda: messagebox.showerror("Error", f"Failed to load images: {e}"))
+        finally:
+            self.master.after(0, self.progress.stop)
+            self.master.after(0, self.progress_frame.grid_remove)
 
     def display_current_page(self):
         for widget in self.image_frame.winfo_children():
@@ -141,13 +146,16 @@ class ImageSelector:
         end_index = min(start_index + self.images_per_page, len(self.all_image_files))
         filenames = self.all_image_files[start_index:end_index]
 
+        threading.Thread(target=self._load_and_display_images, args=(filenames,)).start()
+
+    def _load_and_display_images(self, filenames):
         with ThreadPoolExecutor() as executor:
             futures = [executor.submit(self.load_image, filename) for filename in filenames]
             for i, future in enumerate(futures):
                 row, column = divmod(i, self.gridScaleX)
-                self.display_image(future.result(), row, column)
+                self.master.after(0, self.display_image, future.result(), row, column)
 
-        self.page_label.config(text=f" of {self.total_pages}")
+        self.master.after(0, lambda: self.page_label.config(text=f" of {self.total_pages}"))
 
         # Pre-cache pages 2 before and 2 after the current page
         threading.Thread(target=self.pre_cache_pages).start()
@@ -155,8 +163,8 @@ class ImageSelector:
     def load_image(self, filename):
         path = os.path.join(self.source_var.get(), filename)
         img = Image.open(path)
-        target_width = self.image_frame.winfo_width() // self.gridScaleX - 10
-        target_height = self.image_frame.winfo_height() // self.gridScaleY - 10
+        target_width = max(self.image_frame.winfo_width() // self.gridScaleX - 10, 1)
+        target_height = max(self.image_frame.winfo_height() // self.gridScaleY - 10, 1)
         img.thumbnail((target_width, target_height))
         return ImageTk.PhotoImage(img)
 
@@ -178,8 +186,8 @@ class ImageSelector:
         button = ttk.Button(self.image_frame, image=photo, style='Image.TButton')
         button.image = photo  # Keep a reference!
         button.grid(row=row, column=column, padx=5, pady=5, sticky='nsew')
-        button.bind("<Button-1>", lambda e, button=button: self.toggle_image_selection(button))
-        button.selected = button.image in self.selected_images
+        button.bind("<Button-1>", lambda e, button=button, filename=photo: self.toggle_image_selection(button, filename))
+        button.selected = os.path.join(self.source_var.get(), photo) in self.selected_images
 
         if button.selected:
             button.config(style='Highlight.Image.TButton')
@@ -187,15 +195,17 @@ class ImageSelector:
         # Center the grid horizontally
         self.image_frame.grid_columnconfigure(column, weight=1)
 
-    def toggle_image_selection(self, button):
+    def toggle_image_selection(self, button, filename):
+        file_path = os.path.join(self.source_var.get(), filename)
         if button.selected:
-            self.selected_images.remove(button.image)
+            self.selected_images.remove(file_path)
             button.config(style='Image.TButton')  # Reset to default style
             button.selected = False
         else:
-            self.selected_images.append(button.image)
+            self.selected_images.append(file_path)
             button.config(style='Highlight.Image.TButton')  # Apply the highlight style
             button.selected = True
+        self.update_status_bar()
 
     def save_selected_images(self):
         destination = self.destination_var.get()
@@ -208,18 +218,22 @@ class ImageSelector:
         threading.Thread(target=self._save_selected_images, args=(destination,)).start()
 
     def _save_selected_images(self, destination):
-        for image_path in self.selected_images:
-            shutil.copy(image_path, destination)
-        self.progress.stop()
-        self.progress_frame.grid_remove()
-        messagebox.showinfo("Success", f"Saved {len(self.selected_images)} images to {destination}")
+        try:
+            for image_path in self.selected_images:
+                shutil.copy(image_path, destination)
+            self.master.after(0, lambda: messagebox.showinfo("Success", f"Saved {len(self.selected_images)} images to {destination}"))
+        except Exception as e:
+            self.master.after(0, lambda e=e: messagebox.showerror("Error", f"Failed to save images: {e}"))
+        finally:
+            self.progress.stop()
+            self.progress_frame.grid_remove()
 
     def prev_page(self):
         if self.current_page > 0:
             self.current_page -= 1
         else:
             self.current_page = self.total_pages - 1
-        threading.Thread(target=self.display_current_page).start()
+        self.master.after(0, self.display_current_page)
         self.update_page_number_entry()
 
     def next_page(self):
@@ -227,7 +241,7 @@ class ImageSelector:
             self.current_page += 1
         else:
             self.current_page = 0
-        threading.Thread(target=self.display_current_page).start()
+        self.master.after(0, self.display_current_page)
         self.update_page_number_entry()
 
     def update_page_number_entry(self):
@@ -241,8 +255,11 @@ class ImageSelector:
             'destination': self.destination_var.get(),
             'theme': self.style.theme_use()
         }
-        with open(self.settings_file, 'w') as f:
-            json.dump(settings, f)
+        try:
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {e}")
 
     def load_settings(self):
         try:
@@ -252,15 +269,10 @@ class ImageSelector:
             else:
                 self.settings = {}
         except Exception as e:
-            print(f"Error loading settings: {e}")
+            messagebox.showerror("Error", f"Failed to load settings: {e}")
             self.settings = {}
-        if os.path.exists(self.settings_file):
-            with open(self.settings_file, 'r') as f:
-                self.settings = json.load(f)
-            self.style.theme_use(self.settings.get('theme', 'equilux'))
-            self.current_theme.set(self.settings.get('theme', 'equilux'))
-        else:
-            self.settings = {}
+        self.style.theme_use(self.settings.get('theme', 'equilux'))
+        self.current_theme.set(self.settings.get('theme', 'equilux'))
 
     def validate_directories(self):
         if self.source_var.get() and not os.path.isdir(self.source_var.get()):
@@ -310,10 +322,49 @@ class ImageSelector:
         self.progress.pack(side='left', fill='x', expand=True)
         self.progress_frame.grid_remove()
 
+        self.status_bar = ttk.Label(self.background_frame, text="0 images selected", anchor='w')
+        self.status_bar.grid(row=4, column=0, columnspan=3, sticky='ew')
+
         self.validate_directories()
 
         if self.source_var.get() and os.path.isdir(self.source_var.get()):
             self.load_images_from_directory(self.source_var.get())
+
+    def update_status_bar(self):
+        self.status_bar.config(text=f"{len(self.selected_images)} images selected")
+
+    def open_settings_dialog(self):
+        settings_window = Toplevel(self.master)
+        settings_window.title("Settings")
+
+        ttk.Label(settings_window, text="Theme:").grid(row=0, column=0, padx=10, pady=10)
+        theme_menu = ttk.OptionMenu(settings_window, self.current_theme, self.current_theme.get(), *self.themes)
+        theme_menu.grid(row=0, column=1, padx=10, pady=10)
+
+        ttk.Label(settings_window, text="Grid Size X:").grid(row=1, column=0, padx=10, pady=10)
+        grid_x_entry = ttk.Entry(settings_window)
+        grid_x_entry.insert(0, str(self.gridScaleX))
+        grid_x_entry.grid(row=1, column=1, padx=10, pady=10)
+
+        ttk.Label(settings_window, text="Grid Size Y:").grid(row=2, column=0, padx=10, pady=10)
+        grid_y_entry = ttk.Entry(settings_window)
+        grid_y_entry.insert(0, str(self.gridScaleY))
+        grid_y_entry.grid(row=2, column=1, padx=10, pady=10)
+
+        ttk.Button(settings_window, text="Save", command=lambda: self.save_settings_dialog(grid_x_entry.get(), grid_y_entry.get(), settings_window)).grid(row=3, column=0, columnspan=2, pady=10)
+
+    def save_settings_dialog(self, x, y, window):
+        try:
+            self.gridScaleX = int(x)
+            self.gridScaleY = int(y)
+            self.images_per_page = self.gridScaleX * self.gridScaleY
+            self.total_pages = len(self.all_image_files) // self.images_per_page + (1 if len(self.all_image_files) % self.images_per_page else 0)
+            self.current_page = 0
+            self.master.after(0, self.display_current_page)
+            self.save_settings()
+            window.destroy()
+        except ValueError:
+            messagebox.showerror("Error", "Invalid grid size values.")
 
 def main():
     root = ThemedTk(theme="equilux")
