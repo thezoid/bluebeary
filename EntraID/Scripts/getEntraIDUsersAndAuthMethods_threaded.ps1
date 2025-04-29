@@ -1,31 +1,6 @@
-function writeLog([string]$message, [string]$status = "info") {
-    $timestamp = "$(get-date -Format "yyyyMMMdd@hh:mm:ss")"
-    if (-not(test-path "c:\temp\logs")) {
-        new-item -path "c:\temp\logs" -type directory | out-null
-    }
-    $logFile = "c:\temp\logs\$(get-date -Format "yyyyMMMdd")-AzureADAuthMethods.log"
-    $formattedMessage = "[$timestamp] $message"
-
-    switch ($status.ToLower()) {
-        "info"    { $color = "Blue"; $prefix = "*" }
-        "success" { $color = "Green"; $prefix = "^" }
-        "warning" { $color = "Yellow"; $prefix = "!" }
-        "error"   { $color = "Red"; $prefix = "!!!" }
-        default   { $color = "Blue"; $prefix = "*" }
-    }
-
-    $outputMessage = "$prefix$formattedMessage"
-    write-host $outputMessage -ForegroundColor $color
-    try {
-        $outputMessage | Out-File $logFile -Append
-    } catch {
-        write-host "Failed to write to log file: $_" -ForegroundColor Red
-    }
-}
-
 #force tls 1.2
 [System.Net.ServicePointManager]::SecurityProtocol = 'Tls12'
-$erroractionpreference = "stop"
+$erroractionpreference = "continue"
 #import/install modules
 #install-module Microsoft.Graph.users -scope currentuser -Force
 #install-module Microsoft.Graph.Identity.Signins -scope currentuser  -Force
@@ -38,16 +13,39 @@ if (-not(test-path "c:\temp")) {
 }
 "Name,Email,Auth Methods" | out-file $outpath
 $users = Get-MgUser -All
-$count = 0
 $startTime = get-date
-foreach ($user in $users) {
-    $count++
-    writeLog "[$($count)/$($users.count)] checking $($user.UserPrincipalName)" "info"
+$data = $users | ForEach-Object -Parallel {
+$erroractionpreference = "continue"
+    function writeLog([string]$message, [string]$status = "info") {
+        $timestamp = "$(get-date -Format "yyyyMMMdd@hh:mm:ss")"
+        if (-not(test-path "c:\temp\logs")) {
+            new-item -path "c:\temp\logs" -type directory | out-null
+        }
+        $logFile = "c:\temp\logs\$(get-date -Format "yyyyMMMdd")-AzureADAuthMethods.log"
+        $formattedMessage = "[$timestamp] $message"
+    
+        switch ($status.ToLower()) {
+            "info"    { $color = "Blue"; $prefix = "*" }
+            "success" { $color = "Green"; $prefix = "^" }
+            "warning" { $color = "Yellow"; $prefix = "!" }
+            "error"   { $color = "Red"; $prefix = "!!!" }
+            default   { $color = "Blue"; $prefix = "*" }
+        }
+    
+        $outputMessage = "$prefix$formattedMessage"
+        write-host $outputMessage -ForegroundColor $color
+        try {
+            $outputMessage | Out-File $logFile -Append
+        } catch {
+            write-host "Failed to write to log file: $_" -ForegroundColor Red
+        }
+    }
+    writeLog "checking $($_.UserPrincipalName)" "info"
     try {
-        $authmethods = Get-MgUserAuthenticationMethod -UserId $user.UserPrincipalName
+        $authmethods = Get-MgUserAuthenticationMethod -UserId $_.UserPrincipalName
     }
     catch {
-        writeLog "failed to get auth methods from $($user.UserPrincipalName)`n----- Error Start -----`n$_`n----- Error End -----`n" "error"
+        writeLog "failed to get auth methods from $($_.UserPrincipalName)`n----- Error Start -----`n$_`n----- Error End -----`n" "error"
         continue
     }
 
@@ -84,9 +82,15 @@ foreach ($user in $users) {
     }
 
     $authMethodsString = $authMethodsList -join ";"
-
-    "$($user.DisplayName),$($user.UserPrincipalName),$authMethodsString" | out-file $outpath -Append
-}
+    $output = [PSCustomObject]@{
+        Name         = $_.DisplayName
+        Email        = $_.UserPrincipalName
+        AuthMethods  = $authMethodsString
+    }
+    return $output  # Explicitly return the custom object
+} -ThrottleLimit 10
+$data | ForEach-Object { Write-Host $_ }
+$data | Export-Csv -Path $outpath -NoTypeInformation
 writeLog "Completed in: $(New-TimeSpan -start $startTime -end (get-date))" "success"
 
 
