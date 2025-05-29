@@ -1,3 +1,7 @@
+param(
+    [bool]$LicensedOnly = $false
+)
+
 #force tls 1.2
 [System.Net.ServicePointManager]::SecurityProtocol = 'Tls12'
 $erroractionpreference = "continue"
@@ -25,30 +29,57 @@ function writeLog([string]$message, [string]$status = "info") {
 
     $outputMessage = "$prefix$formattedMessage"
     write-host $outputMessage -ForegroundColor $color
-    try {
-        $outputMessage | Out-File $logFile -Append
-    } catch {
-        write-host "Failed to write to log file: $_" -ForegroundColor Red
+
+    # Thread-safe log writing with retry
+    $maxRetries = 5
+    $retryDelayMs = 200
+    for ($i = 0; $i -lt $maxRetries; $i++) {
+        try {
+            $outputMessage | Add-Content -Path $logFile -Force
+            break
+        } catch {
+            if ($i -eq ($maxRetries - 1)) {
+                write-host "Failed to write to log file after $maxRetries attempts: $_" -ForegroundColor Red
+            } else {
+                Start-Sleep -Milliseconds $retryDelayMs
+            }
+        }
     }
 }
 
 #import/install modules
-#install-module Microsoft.Graph.users -scope currentuser -Force
-#install-module Microsoft.Graph.Identity.Signins -scope currentuser  -Force
-import-module Microsoft.Graph.users
-import-module Microsoft.Graph.Identity.Signins
-Connect-MgGraph -Scopes User.Read.All, UserAuthenticationMethod.Read.All
+#install-module Microsoft.Graph -scope currentuser -Force
+# if (-not (Get-Module -Name Microsoft.Graph.users)) {
+#     import-module Microsoft.Graph.users
+# }
+
+# if (-not (Get-Module -Name Microsoft.Graph.Identity.Signins)) {
+#     import-module Microsoft.Graph.Identity.Signins
+# }
+
+# if (-not (Get-Module -Name Microsoft.Graph.Reports)) {
+#     Import-Module Microsoft.Graph.Reports
+# }
+
+if (-not (Get-Module -Name Microsoft.Graph)) {
+    Import-Module Microsoft.Graph
+}
+
+Connect-MgGraph -Scopes User.Read.All, UserAuthenticationMethod.Read.All, AuditLog.Read.All -NoWelcome
 $outpath = "c:\temp\$(get-date -format "yyyyMMMdd")-EntraIDUserAuthMethods.csv"
 if (-not(test-path "c:\temp")) {
     new-item -path "c:\temp" -type directory | out-null
 }
-"Name,Email,Auth Methods" | out-file $outpath
-$users = Get-MgUser -All
+# Add new columns for Entra features
+$csvHeader = "Name,Email,LastSignIn,DaysSinceLastSignIn,AccountEnabled,LastPasswordReset,DaysSinceLastPasswordReset,CreationDate,EmailLicensed,MfaEnabled,SecureMfaEnabled,Password,Phone,MicrosoftAuthenticator,FIDO2,WindowsHello,EmailMethod,SoftwareOATH,"
+$csvHeader | Out-File $outpath -Encoding UTF8
+$users = Get-MgUser -All -Select "displayName,accountEnabled,UserPrincipalName,lastPasswordChangeDateTime,lastSignInDateTime,signinactivity,CreatedDateTime"
 $startTime = get-date
+$maxConcurrentThreads = 32
 
 # Ensure PowerShell version supports -Parallel
 if ($PSVersionTable.PSVersion.Major -lt 7) {
-    throw "This script requires PowerShell 7.0 or later to use the -Parallel feature."
+    throw "This script requires PowerShell 7.0 or later. You're on version $($PSVersionTable.PSVersion). Please upgrade your PowerShell version."
 }
 
 $data = $users | ForEach-Object -Parallel {
@@ -72,20 +103,132 @@ $data = $users | ForEach-Object -Parallel {
     
         $outputMessage = "$prefix$formattedMessage"
         write-host $outputMessage -ForegroundColor $color
-        try {
-            $outputMessage | Out-File $logFile -Append
-        } catch {
-            write-host "Failed to write to log file: $_" -ForegroundColor Red
+
+        # Thread-safe log writing with retry
+        $maxRetries = 5
+        $retryDelayMs = 200
+        for ($i = 0; $i -lt $maxRetries; $i++) {
+            try {
+                $outputMessage | Add-Content -Path $logFile -Force
+                break
+            } catch {
+                if ($i -eq ($maxRetries - 1)) {
+                    write-host "Failed to write to log file after $maxRetries attempts: $_" -ForegroundColor Red
+                } else {
+                    Start-Sleep -Milliseconds $retryDelayMs
+                }
+            }
         }
+    }
+
+    # Helper: Check if user has an active Exchange Online (email) license
+    function HasActiveEmailLicense($userId) {
+        # Exchange Online, E1/E3/E5, and Business license service plan IDs
+        $exchangePlanIds = @(
+            # Exchange Online
+            "e2d4d3c3-1237-4a6c-9b3a-410a2b2fd2e6", # EXCHANGE_S_STANDARD (Plan 1)
+            "4b9405b0-7788-4568-add1-99614e613b69", # EXCHANGE_S_ENTERPRISE (Plan 2)
+            "c7df2760-2c81-4ef7-b578-5b5392b571df", # EXCHANGE_S_FOUNDATION (Kiosk)
+            # Microsoft 365 E1/E3/E5 (Exchange Online included in these)
+            "33c27c18-402a-4d2a-bf2c-20736c571d1f", # EXCHANGE_S_ENTERPRISE (E1)
+            "efb0351d-3b08-4503-993d-383af8de41e3", # EXCHANGE_S_ENTERPRISE (E3)
+            "5b6abf1a-4362-4b26-8b5f-44d11d1c9077", # EXCHANGE_S_ENTERPRISE (E5)
+            # Microsoft 365 Business Basic/Standard/Premium
+            "c7699d2e-19aa-44de-8edf-1736da088ca1", # EXCHANGE_S_B_P2 (Business Basic)
+            "e95bec33-7c88-4a70-8e19-b10bd9d0c6b6", # EXCHANGE_S_B_P1 (Business Standard)
+            "c52ea49f-fe5d-4e95-93ba-1de91d380f89"  # EXCHANGE_S_B_P3 (Business Premium)
+        )
+        try {
+            $licenseDetails = Get-MgUserLicenseDetail -UserId $userId
+            foreach ($license in $licenseDetails) {
+                foreach ($plan in $license.ServicePlans) {
+                    if ($exchangePlanIds -contains $plan.ServicePlanId -and $plan.ProvisioningStatus -eq "Success") {
+                        return $true
+                    }
+                }
+            }
+        } catch {
+            writeLog "Failed to get license details for $userId`n----- Error Start -----`n$_`n----- Error End -----`n" "error"
+        }
+        return $false
+    }
+
+    # Helper: Retry wrapper for Get-MgUserAuthenticationMethod
+    function Get-AuthMethodsWithRetry {
+        param(
+            [Parameter(Mandatory=$true)][string]$UserId,
+            [int]$MaxRetries = 5,
+            [int]$InitialDelaySeconds = 5
+        )
+        $attempt = 0
+        $delay = $InitialDelaySeconds
+        while ($attempt -lt $MaxRetries) {
+            try {
+                return Get-MgUserAuthenticationMethod -UserId $UserId -ErrorAction Stop
+            } catch {
+                $errMsg = $_.Exception.Message
+                if ($errMsg -match "Too Many Requests" -or $errMsg -match "429") {
+                    writeLog "Too Many Requests for $UserId. Attempt $($attempt+1) of $MaxRetries. Retrying in $delay seconds..." "warning"
+                    Start-Sleep -Seconds $delay
+                    $attempt++
+                    $delay = [Math]::Min($delay * 2, 60) # exponential backoff, max 60s
+                    continue
+                } else {
+                    throw $_
+                }
+            }
+        }
+        throw "Too many retries for $UserId. Aborting."
     }
 
     writeLog "checking $($_.UserPrincipalName)" "info"
 
+    # Define output object with all method columns
+    $result = [ordered]@{
+        Name                   = $_.DisplayName
+        Email                  = $_.UserPrincipalName
+        Password               = ""
+        Phone                  = ""
+        MicrosoftAuthenticator = ""
+        FIDO2                  = ""
+        WindowsHello           = ""
+        EmailMethod            = ""
+        SoftwareOATH           = ""
+        LastSignIn             = ""
+        DaysSinceLastSignIn    = ""
+        MfaEnabled             = ""
+        SecureMfaEnabled       = ""
+        AccountEnabled         = ""
+        LastPasswordReset      = ""
+        DaysSinceLastPasswordReset = ""
+        CreationDate           = ""
+        EmailLicensed          = ""
+    }
+
+    # Check for active email license before proceeding, if enabled
+    $hasEmailLicense = $false
+    if ($using:LicensedOnly) {
+        if (-not (HasActiveEmailLicense $_.Id)) {
+            $result.EmailLicensed = "No"
+            writeLog "Skipping $($_.UserPrincipalName) - no active email license." "warning"
+            return
+        } else {
+            $hasEmailLicense = $true
+        }
+    } else {
+        if (HasActiveEmailLicense $_.Id) {
+            $hasEmailLicense = $true
+        }
+    }
+    $result.EmailLicensed = if ($hasEmailLicense) { "Yes" } else { "No" }
+
     try {
-        $authmethods = Get-MgUserAuthenticationMethod -UserId $_.UserPrincipalName
+        $authmethods = Get-AuthMethodsWithRetry -UserId $_.Id
     }
     catch {
-        if ($_.ErrorDetails.Message -match "More than one users found") {
+        $errMsg = $_.Exception.Message
+        if (($_ -and $_.ErrorDetails -and $_.ErrorDetails.Message -match "More than one users found") -or
+            ($errMsg -and $errMsg -match "More than one users found")) {
             writeLog "Multiple users found for $($_.UserPrincipalName). Attempting to process all matching accounts." "warning"
             try {
                 # Retrieve all matching accounts
@@ -93,46 +236,51 @@ $data = $users | ForEach-Object -Parallel {
                 foreach ($user in $matchingUsers) {
                     writeLog "Processing account: $($user.UserPrincipalName)" "info"
                     try {
-                        $authmethods = Get-MgUserAuthenticationMethod -UserId $user.Id
+                        $authmethods = Get-AuthMethodsWithRetry -UserId $user.Id
                         # Process auth methods for this account
-                        $authMethodsList = @()
                         foreach ($method in $authmethods) {
                             $odataType = $method.AdditionalProperties['@odata.type']
-                            $details = switch ($odataType) {
+                            switch ($odataType) {
                                 "#microsoft.graph.passwordAuthenticationMethod" {
-                                    "Password (Created: $($method.AdditionalProperties['createdDateTime']))"
+                                    $result.Password = "Yes"
                                 }
                                 "#microsoft.graph.phoneAuthenticationMethod" {
-                                    "Phone (Number: $($method.AdditionalProperties['phoneNumber']), Type: $($method.AdditionalProperties['phoneType']), SMS Sign-In: $($method.AdditionalProperties['smsSignInState']))"
+                                    $phone = $method.AdditionalProperties['phoneNumber']
+                                    $type = $method.AdditionalProperties['phoneType']
+                                    $sms = $method.AdditionalProperties['smsSignInState']
+                                    $result.Phone = "Number: $phone; Type: $type; SMS: $sms"
                                 }
                                 "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod" {
-                                    "Microsoft Authenticator (Device: $($method.AdditionalProperties['displayName']), App Version: $($method.AdditionalProperties['phoneAppVersion']), Tag: $($method.AdditionalProperties['deviceTag']))"
+                                    $device = $method.AdditionalProperties['displayName']
+                                    $version = $method.AdditionalProperties['phoneAppVersion']
+                                    $tag = $method.AdditionalProperties['deviceTag']
+                                    $result.MicrosoftAuthenticator = "Device: $device; Version: $version; Tag: $tag"
                                 }
                                 "#microsoft.graph.fido2AuthenticationMethod" {
-                                    "FIDO2 (Device: $($method.AdditionalProperties['displayName']), Created: $($method.AdditionalProperties['createdDateTime']), AAGUID: $($method.AdditionalProperties['aaGuid']))"
+                                    $device = $method.AdditionalProperties['displayName']
+                                    $created = $method.AdditionalProperties['createdDateTime']
+                                    $aaguid = $method.AdditionalProperties['aaGuid']
+                                    $result.FIDO2 = "Device: $device; Created: $created; AAGUID: $aaguid"
                                 }
                                 "#microsoft.graph.windowsHelloForBusinessAuthenticationMethod" {
-                                    "Windows Hello (Device: $($method.AdditionalProperties['displayName']), Created: $($method.AdditionalProperties['createdDateTime']), Key Strength: $($method.AdditionalProperties['keyStrength']))"
+                                    $device = $method.AdditionalProperties['displayName']
+                                    $created = $method.AdditionalProperties['createdDateTime']
+                                    $keyStrength = $method.AdditionalProperties['keyStrength']
+                                    $result.WindowsHello = "Device: $device; Created: $created; KeyStrength: $keyStrength"
                                 }
                                 "#microsoft.graph.emailAuthenticationMethod" {
-                                    "Email (Address: $($method.AdditionalProperties['emailAddress']))"
+                                    $email = $method.AdditionalProperties['emailAddress']
+                                    $result.EmailMethod = "Address: $email"
                                 }
                                 "#microsoft.graph.softwareOathAuthenticationMethod" {
-                                    "Software OATH"
+                                    $result.SoftwareOATH = "Yes"
                                 }
                                 default {
-                                    "Unknown Method (Type: $odataType)"
+                                    # ignore unknowns for columns
                                 }
                             }
-                            $authMethodsList += "$($details)".replace(",", " ")
                         }
-                        $authMethodsString = $authMethodsList -join ";"
-                        $output = [PSCustomObject]@{
-                            Name         = $user.DisplayName
-                            Email        = $user.UserPrincipalName
-                            AuthMethods  = $authMethodsString
-                        }
-                        return $output
+                        return [PSCustomObject]$result
                     }
                     catch {
                         writeLog "Failed to process account: $($user.UserPrincipalName)`n----- Error Start -----`n$_`n----- Error End -----`n" "error"
@@ -148,51 +296,104 @@ $data = $users | ForEach-Object -Parallel {
         continue
     }
 
-    $authMethodsList = @()
-    foreach ($method in $authmethods) {
-        $odataType = $method.AdditionalProperties['@odata.type']
-        $details = switch ($odataType) {
-            "#microsoft.graph.passwordAuthenticationMethod" {
-                "Password (Created: $($method.AdditionalProperties['createdDateTime']))"
-            }
-            "#microsoft.graph.phoneAuthenticationMethod" {
-                "Phone (Number: $($method.AdditionalProperties['phoneNumber']), Type: $($method.AdditionalProperties['phoneType']), SMS Sign-In: $($method.AdditionalProperties['smsSignInState']))"
-            }
-            "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod" {
-                "Microsoft Authenticator (Device: $($method.AdditionalProperties['displayName']), App Version: $($method.AdditionalProperties['phoneAppVersion']), Tag: $($method.AdditionalProperties['deviceTag']))"
-            }
-            "#microsoft.graph.fido2AuthenticationMethod" {
-                "FIDO2 (Device: $($method.AdditionalProperties['displayName']), Created: $($method.AdditionalProperties['createdDateTime']), AAGUID: $($method.AdditionalProperties['aaGuid']))"
-            }
-            "#microsoft.graph.windowsHelloForBusinessAuthenticationMethod" {
-                "Windows Hello (Device: $($method.AdditionalProperties['displayName']), Created: $($method.AdditionalProperties['createdDateTime']), Key Strength: $($method.AdditionalProperties['keyStrength']))"
-            }
-            "#microsoft.graph.emailAuthenticationMethod" {
-                "Email (Address: $($method.AdditionalProperties['emailAddress']))"
-            }
-            "#microsoft.graph.softwareOathAuthenticationMethod" {
-                "Software OATH"
-            }
-            default {
-                "Unknown Method (Type: $odataType)"
-            }
-        }
-        $authMethodsList += "$($details)".replace(",", " ")
+    # Check if the user is enabled
+    try{
+        $result.AccountEnabled = $_.accountEnabled
+    }catch{
+        $result.AccountEnabled = "Not available"
+        writeLog "Failed to get account enabled status for $($_.UserPrincipalName): $_" "warning"
+    }
+    # Get last sign-in time
+    try {
+        $lastSignIn = $_.SignInActivity.LastSignInDateTime
+        $result.LastSignIn = if (!$lastSignIn) { "Not available" } else { $lastSignIn }
+        $result.DaysSinceLastSignIn = if ($lastSignIn) { [int]((Get-Date) - [datetime]$lastSignIn).TotalDays } else { "" }
+    } catch {
+        $result.LastSignIn = "Not available"
+        $result.DaysSinceLastSignIn = ""
+        writeLog "Failed to get last sign-in for $($_.UserPrincipalName): $_" "warning"
+    }
+    # Add Entra features
+    try {
+        $lastPwdReset = $_.lastPasswordChangeDateTime
+        $result.LastPasswordReset = if (!$lastPwdReset) { "Not Available" } else { $lastPwdReset }
+        $result.DaysSinceLastPasswordReset = if ($lastPwdReset) { [int]((Get-Date) - [datetime]$lastPwdReset).TotalDays } else { "" }
+    } catch {
+        $result.LastPasswordReset = "Not Available"
+        $result.DaysSinceLastPasswordReset = ""
+        writeLog "Failed to get last password reset for $($_.UserPrincipalName): $_" "warning"
+    }
+    try {
+        $result.CreationDate = if (!$_.CreationDate) { "Not Available" } else { $_.CreatedDateTime }
+    } catch {
+        $result.CreationDate = "Not Available"
+        writeLog "Failed to get creation date for $($_.UserPrincipalName): $_" "warning"
     }
 
-    $authMethodsString = $authMethodsList -join ";"
-    $output = [PSCustomObject]@{
-        Name         = $_.DisplayName
-        Email        = $_.UserPrincipalName
-        AuthMethods  = $authMethodsString
+    # Track MFA methods
+    $hasAnyMfa = $false
+    $hasSecureMfa = $false
+
+    foreach ($method in $authmethods) {
+        $odataType = $method.AdditionalProperties['@odata.type']
+        switch ($odataType) {
+            "#microsoft.graph.passwordAuthenticationMethod" {
+                $result.Password = "Yes"
+            }
+            "#microsoft.graph.phoneAuthenticationMethod" {
+                $phone = $method.AdditionalProperties['phoneNumber']
+                $type = $method.AdditionalProperties['phoneType']
+                $sms = $method.AdditionalProperties['smsSignInState']
+                $result.Phone = "Number: $phone; Type: $type; SMS: $sms"
+                $hasAnyMfa = $true
+            }
+            "#microsoft.graph.microsoftAuthenticatorAuthenticationMethod" {
+                $device = $method.AdditionalProperties['displayName']
+                $version = $method.AdditionalProperties['phoneAppVersion']
+                $tag = $method.AdditionalProperties['deviceTag']
+                $result.MicrosoftAuthenticator = "Device: $device; Version: $version; Tag: $tag"
+                $hasAnyMfa = $true
+                $hasSecureMfa = $true
+            }
+            "#microsoft.graph.fido2AuthenticationMethod" {
+                $device = $method.AdditionalProperties['displayName']
+                $created = $method.AdditionalProperties['createdDateTime']
+                $aaguid = $method.AdditionalProperties['aaGuid']
+                $result.FIDO2 = "Device: $device; Created: $created; AAGUID: $aaguid"
+                $hasAnyMfa = $true
+                $hasSecureMfa = $true
+            }
+            "#microsoft.graph.windowsHelloForBusinessAuthenticationMethod" {
+                $device = $method.AdditionalProperties['displayName']
+                $created = $method.AdditionalProperties['createdDateTime']
+                $keyStrength = $method.AdditionalProperties['keyStrength']
+                $result.WindowsHello = "Device: $device; Created: $created; KeyStrength: $keyStrength"
+                $hasAnyMfa = $true
+            }
+            "#microsoft.graph.emailAuthenticationMethod" {
+                $email = $method.AdditionalProperties['emailAddress']
+                $result.EmailMethod = "Address: $email"
+            }
+            "#microsoft.graph.softwareOathAuthenticationMethod" {
+                $result.SoftwareOATH = "Yes"
+                $hasAnyMfa = $true
+            }
+            default {
+                writeLog -message "Unknown authentication method type for $($_.UserPrincipalName): $odataType" -status "warning"
+            }
+        }
     }
-    return $output  # Explicitly return the custom object
-}  -ThrottleLimit 10
+
+    $result.MfaEnabled = if ($hasAnyMfa) { "Yes" } else { "No" }
+    $result.SecureMfaEnabled = if ($hasSecureMfa) { "Yes" } else { "No" }
+
+    return [PSCustomObject]$result  # Explicitly return the custom object
+}  -ThrottleLimit $maxConcurrentThreads
 
 # Check if $data is null before exporting
 if ($null -ne $data) {
     $data | ForEach-Object { Write-Host $_ }
-    $data | Export-Csv -Path $outpath -NoTypeInformation
+    $data | Export-Csv -Path $outpath -NoTypeInformation -Append
 } else {
     writeLog "No data to export. The script did not process any users." "warning"
 }
