@@ -2,9 +2,10 @@ Param(
      [Parameter(Mandatory=$true)][string]$tenantName,
      [Parameter(Mandatory=$true)][string]$userPrincipalName,
      [ValidateSet("commercial", "gcc", "gcchigh", "dod")][string]$m365Environment="commercial",
-     [string]$logPath = "c:\MasterScanner\Logs",
+     [string]$logPath = "c:\\MasterScanner\\Logs",
      [int]$loggingLevel = 5
 )
+
 function Write-Log {
      param (
          [string]$Message,
@@ -29,35 +30,27 @@ function Write-Log {
              if (-not (Test-Path $LogPath)) {
                  New-Item -ItemType Directory -Path $LogPath
              }
-             $logFilePath = Join-Path -Path $LogPath -ChildPath "$(Get-Date -Format 'yyyyMMdd').log"
-             Add-Content -Path $logFilePath -Value "[$($Type.ToUpper())][$(Get-Date -Format 'yyyyMMdd@HH:mm:ss')] $Message"
+             $logFile = Join-Path $LogPath ("scuba-" + (Get-Date -Format 'yyyyMMdd') + ".log")
+             Add-Content -Path $logFile -Value "[$($Type.ToUpper())][$(Get-Date -Format 'yyyyMMdd@HH:mm:ss')] $Message"
          }
      }
- }
-
-if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
-     Write-Log "SCuBA requires PowerShell 5.1" "Error" $logPath $loggingLevel
-     exit 1
 }
 
-$ErrorActionPreference = "Continue"
-if (-not (Get-Module -ListAvailable -Name ScubaGear)) {
-     Install-Module -Name ScubaGear -AllowClobber -Force
+# Ensure ScubaGear is available from PowerShell 7 installation path
+$ps7ModulePath = "$HOME\Documents\PowerShell\Modules"
+$winPSModulePath = "$HOME\Documents\WindowsPowerShell\Modules"
+$scubaModulePath = Join-Path $ps7ModulePath "ScubaGear"
+
+if (Test-Path $scubaModulePath) {
+    Copy-Item -Path $scubaModulePath -Destination $winPSModulePath -Recurse -Force -ErrorAction SilentlyContinue
+    $env:PSModulePath = "$winPSModulePath;$env:PSModulePath"
 }
- 
-if (-not (Get-Module -Name ScubaGear)) {
-     Import-Module ScubaGear
-}
- 
-Initialize-SCuBA 
+
+Import-Module ScubaGear -Force
+Initialize-SCuBA
 Invoke-SCuBA -Version
-
-#run scuba
 Invoke-SCuBA -ProductNames * `
      -OutPath "c:\MasterScanner\Results" `
-     -OutFolderName "SCuBA" `
+     -OutFolderName "$($tenantName)-SCuBA" `
      -DisconnectOnExit `
      -M365Environment $m365Environment 
-# -AppID $clientId `
-# -Organization  $tenantName `
-# -CertificateThumbprint $certThumbprint `

@@ -41,37 +41,55 @@ function Write-Log {
 
 #run stage
 try {
-     $stagingResults = & "$PSScriptRoot\stage.ps1" -TenantName $tenantName -UserPrincipalName $userPrincipalName -LogPath $logPath -LoggingLevel $loggingLevel
+    & "$PSScriptRoot\stage.ps1" -TenantName $tenantName -UserPrincipalName $userPrincipalName -LogPath $logPath -LoggingLevel $loggingLevel
 } catch {
      Write-Log -Message "Failed to stage`n$_" -Type "ERROR" -LogPath $logPath -LoggingLevel $loggingLevel
      exit 1
 }
 
-# $clientId = $stagingResults.ClientId
-# $certPath = $stagingResults.CertPath
-# $certPassword = $stagingResults.CertPassword
-# $certThumbprint = (Get-PfxCertificate -FilePath $certPath).Thumbprint
+# --- SCUBA ---
+Write-Log -Message "Running SCuBA via Windows PowerShell 5.1" -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
 
-#cd c:\MasterScanner
-
-# run scuba
-# requires in powershell 5
-if ($PSVersionTable.PSVersion -join "." -notlike "5.*") {
-    Write-Log -Message "SCuBA requires PowerShell 5 - launching SCuBA subprocess in new PS5 instance" -Type "warning" -LogPath $logPath -LoggingLevel $loggingLevel
-    $scubaprocess = Start-Process -FilePath "powershell.exe" -ArgumentList @(
-        "-Version 5.1",
-        "-Command `"& {& '$PSScriptRoot\scuba.ps1' -TenantName '$tenantName' -UserPrincipalName '$userPrincipalName' -M365Environment '$m365Environment' -LogPath '$logPath' -LoggingLevel $loggingLevel}`""
-    ) -NoNewWindow -Wait
-}else{
-    write-log -Message "Running SCuBA" -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
-    $scubaprocess = & "$PSScriptRoot\scuba.ps1" -TenantName $tenantName -UserPrincipalName $userPrincipalName -M365Environment $m365Environment -LogPath $logPath -LoggingLevel $loggingLevel
+try{
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\scuba.ps1" `
+        -TenantName $tenantName `
+        -UserPrincipalName $userPrincipalName `
+        -M365Environment $m365Environment `
+        -LogPath $logPath `
+        -LoggingLevel $loggingLevel
+}catch{
+    Write-Log -Message "Failed to run SCuBA`n$_" -Type "ERROR" -LogPath $logPath -LoggingLevel $loggingLevel
 }
 
-# run maester
+
+# --- Maester ---
+Write-Log -Message "Running Maester natively in PowerShell 7" -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
 try {
-    write-log -Message "Running Maester" -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
-    $maesterprocess = & "$PSScriptRoot\maester.ps1" -TenantName $tenantName -UserPrincipalName $userPrincipalName -M365Environment $m365Environment -LogPath $logPath -LoggingLevel $loggingLevel
-} catch {
+    & "$PSScriptRoot\maester.ps1" `
+        -TenantName $tenantName `
+        -UserPrincipalName $userPrincipalName `
+        -M365Environment $m365Environment `
+        -LogPath $logPath `
+        -LoggingLevel $loggingLevel
+}
+catch {
     Write-Log -Message "Failed to run Maester`n$_" -Type "ERROR" -LogPath $logPath -LoggingLevel $loggingLevel
-    exit 1
+}
+
+# Archive the results folder to a zip file
+$resultsFolder = "C:\MasterScanner\Results"
+$archiveDir = Split-Path -Path $resultsFolder -Parent
+$archiveName = "$($tenantName)_$((Get-Date -Format 'yyyyMMdd_HHmmss')).zip" 
+$archivePath = Join-Path -Path $archiveDir -ChildPath $archiveName
+$archivePath = Join-Path -Path $PSScriptRoot -ChildPath ("results_{0}.zip" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+
+if (Test-Path $resultsFolder) {
+    try {
+        Compress-Archive -Path "$resultsFolder\*" -DestinationPath $archivePath -Force
+        Write-Log -Message "Archived results to $archivePath" -Type "SUCCESS" -LogPath $logPath -LoggingLevel $loggingLevel
+    } catch {
+        Write-Log -Message "Failed to archive results folder`n$_" -Type "ERROR" -LogPath $logPath -LoggingLevel $loggingLevel
+    }
+} else {
+    Write-Log -Message "Results folder not found at $resultsFolder" -Type "WARNING" -LogPath $logPath -LoggingLevel $loggingLevel
 }
