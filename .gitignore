@@ -15,3 +15,4 @@ override.tf.json
 terraform.rc
 .prettierrc
 *.env
+NinjaOne/scripts/excludeddevices.txt
