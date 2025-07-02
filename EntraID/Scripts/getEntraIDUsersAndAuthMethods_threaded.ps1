@@ -65,13 +65,20 @@ if (-not (Get-Module -Name Microsoft.Graph)) {
     Import-Module Microsoft.Graph
 }
 
+Disconnect-MgGraph -ErrorAction SilentlyContinue
 Connect-MgGraph -Scopes User.Read.All, UserAuthenticationMethod.Read.All, AuditLog.Read.All -NoWelcome
-$outpath = "c:\temp\$(get-date -format "yyyyMMMdd")-EntraIDUserAuthMethods.csv"
+# Get the signed-in user's domain for dynamic path
+$tenantDomain = (Get-MgOrganization).VerifiedDomains | Where-Object { $_.IsDefault } | Select-Object -ExpandProperty Name
+if (-not $tenantDomain) {
+    # fallback: try to get from the first verified domain
+    $tenantDomain = (Get-MgOrganization).VerifiedDomains | Select-Object -First 1 -ExpandProperty Name
+}
+$outpath = "c:\temp\$(get-date -format "yyyyMMMdd")-$tenantDomain-EntraIDUserAuthMethods.csv"
 if (-not(test-path "c:\temp")) {
     new-item -path "c:\temp" -type directory | out-null
 }
 # Add new columns for Entra features
-$csvHeader = "Name,Email,LastSignIn,DaysSinceLastSignIn,AccountEnabled,LastPasswordReset,DaysSinceLastPasswordReset,CreationDate,EmailLicensed,MfaEnabled,SecureMfaEnabled,Password,Phone,MicrosoftAuthenticator,FIDO2,WindowsHello,EmailMethod,SoftwareOATH,"
+$csvHeader = "Name,Email,LastSignIn,DaysSinceLastSignIn,AccountEnabled,LastPasswordReset,DaysSinceLastPasswordReset,CreationDate,EmailLicensed,MfaEnabled,SecureMfaEnabled,Password,Phone,MicrosoftAuthenticator,FIDO2,WindowsHello,EmailMethod,SoftwareOATH,TemporaryAccessPass,"
 $csvHeader | Out-File $outpath -Encoding UTF8
 $users = Get-MgUser -All -Select "displayName,accountEnabled,UserPrincipalName,lastPasswordChangeDateTime,lastSignInDateTime,signinactivity,CreatedDateTime"
 $startTime = get-date
@@ -181,7 +188,7 @@ $data = $users | ForEach-Object -Parallel {
         throw "Too many retries for $UserId. Aborting."
     }
 
-    writeLog "checking $($_.UserPrincipalName)" "info"
+    writeLog "checking $($_.UserPrincipalName) [$($_.id)]" "info"
 
     # Define output object with all method columns
     $result = [ordered]@{
@@ -194,6 +201,7 @@ $data = $users | ForEach-Object -Parallel {
         WindowsHello           = ""
         EmailMethod            = ""
         SoftwareOATH           = ""
+        TemporaryAccessPass    = ""
         LastSignIn             = ""
         DaysSinceLastSignIn    = ""
         MfaEnabled             = ""
@@ -276,7 +284,7 @@ $data = $users | ForEach-Object -Parallel {
                                     $result.SoftwareOATH = "Yes"
                                 }
                                 default {
-                                    # ignore unknowns for columns
+                                    writeLog -message "Unknown authentication method type for $($_.UserPrincipalName): $odataType" -status "warning"
                                 }
                             }
                         }
@@ -376,6 +384,10 @@ $data = $users | ForEach-Object -Parallel {
             }
             "#microsoft.graph.softwareOathAuthenticationMethod" {
                 $result.SoftwareOATH = "Yes"
+                $hasAnyMfa = $true
+            }
+            "#microsoft.graph.temporaryAccessPassAuthenticationMethod" {
+                $result.TemporaryAccessPass = "Yes"
                 $hasAnyMfa = $true
             }
             default {

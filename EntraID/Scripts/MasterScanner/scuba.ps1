@@ -46,7 +46,14 @@ if (Test-Path $scubaModulePath) {
     $env:PSModulePath = "$winPSModulePath;$env:PSModulePath"
 }
 
-Import-Module ScubaGear -Force
+try{
+    Import-Module ScubaGear -Force
+
+}catch{
+    Install-Module ScubaGear -Scope CurrentUser
+    Import-Module ScubaGear -Force
+}
+
 Initialize-SCuBA
 Invoke-SCuBA -Version
 Invoke-SCuBA -ProductNames * `

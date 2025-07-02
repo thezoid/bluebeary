@@ -36,8 +36,23 @@ function Write-Log {
     }
 }
 
-#vars
-#endvar
+# Helper to create .url shortcut
+function New-UrlShortcut {
+    param(
+        [string]$TargetPath,
+        [string]$ShortcutPath
+    )
+    $content = @"
+[InternetShortcut]
+URL=file:///$($TargetPath -replace '\\','/')
+"@
+    Set-Content -Path $ShortcutPath -Value $content -Encoding ASCII
+}
+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Log -Message "This script must be run in PowerShell 7 or higher. Current version: $($PSVersionTable.PSVersion)" -Type "ERROR" -LogPath $logPath -LoggingLevel $loggingLevel
+    exit 1
+}
 
 #run stage
 try {
@@ -79,16 +94,62 @@ catch {
 # Archive the results folder to a zip file
 $resultsFolder = "C:\MasterScanner\Results"
 $archiveDir = Split-Path -Path $resultsFolder -Parent
-$archiveName = "$($tenantName)_$((Get-Date -Format 'yyyyMMdd_HHmmss')).zip" 
+$archiveName = "$($tenantName)_$((Get-Date -Format 'yyyyMMdd_HHmmss')).zip"
 $archivePath = Join-Path -Path $archiveDir -ChildPath $archiveName
-$archivePath = Join-Path -Path $PSScriptRoot -ChildPath ("results_{0}.zip" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+
+# --- Add shortcuts to reports at the root of the zip ---
+# Build dynamic paths for the reports
+$scubaFolder = Get-ChildItem -Path $resultsFolder -Directory | Where-Object { $_.Name -like "$tenantName-SCuBA*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$scubaReportPath = if ($scubaFolder) { Join-Path $scubaFolder.FullName "BaselineReports.html" } else { $null }
+
+# Find the latest Maester test results HTML file
+$maesterTestResultsDir = Join-Path $resultsFolder "maester-tests\test-results"
+$maesterReportFile = if (Test-Path $maesterTestResultsDir) {
+    Get-ChildItem -Path $maesterTestResultsDir -Filter "TestResults-*.html" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+} else { $null }
+$maesterReportPath = if ($maesterReportFile) { $maesterReportFile.FullName } else { $null }
+
+# Prepare temp folder for shortcuts
+$tempShortcutDir = Join-Path $env:TEMP ("MasterScannerShortcuts_" + [guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $tempShortcutDir | Out-Null
+
+# Create shortcuts if reports exist
+$shortcutFiles = @()
+if ($scubaReportPath -and (Test-Path $scubaReportPath)) {
+    $scubaShortcut = Join-Path $tempShortcutDir "SCuBA_BaselineReports.url"
+    New-UrlShortcut -TargetPath $scubaReportPath -ShortcutPath $scubaShortcut
+    $shortcutFiles += $scubaShortcut
+}
+if ($maesterReportPath -and (Test-Path $maesterReportPath)) {
+    $maesterShortcut = Join-Path $tempShortcutDir "Maester_TestResults.url"
+    New-UrlShortcut -TargetPath $maesterReportPath -ShortcutPath $maesterShortcut
+    $shortcutFiles += $maesterShortcut
+}
 
 if (Test-Path $resultsFolder) {
     try {
         Compress-Archive -Path "$resultsFolder\*" -DestinationPath $archivePath -Force
+        # Add shortcuts to the root of the zip
+        foreach ($shortcut in $shortcutFiles) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [System.IO.Compression.ZipFile]::Open($archivePath, [System.IO.Compression.ZipArchiveMode]::Update)
+            try {
+                $entryName = [System.IO.Path]::GetFileName($shortcut)
+                $entry = $zip.CreateEntry($entryName)
+                $stream = $entry.Open()
+                [byte[]]$bytes = [System.IO.File]::ReadAllBytes($shortcut)
+                $stream.Write($bytes, 0, $bytes.Length)
+                $stream.Close()
+            } finally {
+                $zip.Dispose()
+            }
+        }
         Write-Log -Message "Archived results to $archivePath" -Type "SUCCESS" -LogPath $logPath -LoggingLevel $loggingLevel
     } catch {
         Write-Log -Message "Failed to archive results folder`n$_" -Type "ERROR" -LogPath $logPath -LoggingLevel $loggingLevel
+    } finally {
+        # Clean up temp shortcut files
+        Remove-Item -Path $tempShortcutDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 } else {
     Write-Log -Message "Results folder not found at $resultsFolder" -Type "WARNING" -LogPath $logPath -LoggingLevel $loggingLevel
