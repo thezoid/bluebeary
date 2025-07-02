@@ -1,0 +1,4 @@
+# List device names (systemName) to exclude, one per line.
+# Example:
+# DEVICE-123
+# LAPTOP-XYZ

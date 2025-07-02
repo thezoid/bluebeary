@@ -669,6 +669,16 @@ $teamsWebhookUrl = $config['TEAMS_WEBHOOK_URL']
 $lookbackPeriod = [int]($config['LOOKBACK_PERIOD'] ?? 90)
 $thresholdDate = (Get-Date).AddDays(-$lookbackPeriod)
 
+# Load excluded device names from excludeddevices.txt
+$excludedDevicesPath = Join-Path $PSScriptRoot "excludeddevices.txt"
+$excludedDeviceNames = @()
+if (Test-Path $excludedDevicesPath) {
+    $excludedDeviceNames = Get-Content $excludedDevicesPath | Where-Object { $_.Trim() -ne "" -and -not ($_.Trim().StartsWith("#")) }
+    Write-Log -Message "Loaded $($excludedDeviceNames.Count) excluded device names from excludeddevices.txt." -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
+} else {
+    Write-Log -Message "No excludeddevices.txt found. No devices will be excluded." -Type "WARNING" -LogPath $logPath -LoggingLevel $loggingLevel
+}
+
 # Main processing section
 try {
      Write-Log -Message "Script execution started." -Type "ALWAYS" -LogPath $logPath -LoggingLevel $loggingLevel
@@ -676,6 +686,13 @@ try {
           Write-Log -Message "Retrieving device data from NinjaOne API." -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
           $devices = Get-NinjaDeviceData -clientId $ninjaClientId -clientSecret $ninjaClientSecret -apiEndpoint $ninjaDevicesAPIEndpoint -logPath $logPath -loggingLevel $loggingLevel
           Write-Log -Message "Device data retrieval complete." -Type "DEBUG" -LogPath $logPath -LoggingLevel $loggingLevel
+
+          # Filter out excluded devices by systemName
+          if ($excludedDeviceNames.Count -gt 0) {
+              $devices = $devices | Where-Object { $excludedDeviceNames -notcontains $_.systemName }
+              Write-Log -Message "Excluded devices filtered. $($devices.Count) devices remain after exclusion." -Type "INFO" -LogPath $logPath -LoggingLevel $loggingLevel
+          }
+
           if ($devices.Count -ge 0) {
                Write-Log -Message "Successfully retrieved [$($devices.Count)] devices." -Type "SUCCESS" -LogPath $logPath -LoggingLevel $loggingLevel
                $devices | export-csv -nti $PSScriptRoot\allninjadevices.csv
